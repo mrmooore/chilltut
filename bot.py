@@ -1,0 +1,815 @@
+import logging
+import random
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (
+    Application, CommandHandler, MessageHandler, CallbackQueryHandler,
+    ConversationHandler, ContextTypes, filters
+)
+
+# ═══════════════════════════════════════════
+# НАСТРОЙКИ
+# ═══════════════════════════════════════════
+TOKEN = "8862192483:AAGI2bwDL7pjNJFFAMpL461m437ChNqCopM"
+ADMIN_USERNAME = "@Chill_TooT_Vrn"
+ADMIN_CHAT_ID = None  # Заполнится автоматически когда админ напишет /start
+
+# Предоплата
+PREPAYMENT_PERCENT = 20
+
+# Цены (в рублях)
+PRICES = {
+    "PS5 Slim": 1149,
+    "PS4 Slim": 799,
+    "PS VR2": 999,
+    "Руль Logitech G29": 999,
+    "Доп. джойстик PS5": 699,
+    "Доп. джойстик PS4": 399,
+    "Кальян": 849,
+    "Уголь (10шт)": 399,
+    "Табак (25-30г)": 250,
+    "Плитка": 349,
+    "Личный кальянщик": 1149,
+    "Чай (уточнить)": 0,
+}
+
+# ═══════════════════════════════════════════
+# СОСТОЯНИЯ РАЗГОВОРА
+# ═══════════════════════════════════════════
+(
+    START, HOW_ARE_YOU, GET_ADDRESS, GET_SOURCE, 
+    CATEGORY_CHOICE, PS_CHOICE, PS_DAYS, 
+    HOOKAH_CHOICE, HOOKAH_DAYS,
+    TEA_CHOICE, TEA_AMOUNT,
+    FOOD_CHOICE,
+    ADD_MORE, CONFIRM_ORDER,
+    HISTORY, DICE
+) = range(16)
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Хранилище заказов (в памяти, для продакшена используй БД)
+orders_db = {}
+order_counter = [1000]
+
+def get_order_id():
+    order_counter[0] += 1
+    return order_counter[0]
+
+# ═══════════════════════════════════════════
+# КЛАВИАТУРЫ
+# ═══════════════════════════════════════════
+
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🛒 Оформить заказ", callback_data="order")],
+        [InlineKeyboardButton("📋 Мои заказы", callback_data="history"),
+         InlineKeyboardButton("🎲 Бросить кубик", callback_data="dice")],
+    ])
+
+def category_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎮 PlayStation", callback_data="cat_ps")],
+        [InlineKeyboardButton("💨 Кальян", callback_data="cat_hookah")],
+        [InlineKeyboardButton("🍵 Чай", callback_data="cat_tea")],
+        [InlineKeyboardButton("🍔 Еда и напитки", callback_data="cat_food")],
+        [InlineKeyboardButton("✅ Готово — оформить заказ", callback_data="cat_done")],
+    ])
+
+def ps_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("PS5 Slim — 1149₽/сут", callback_data="ps_PS5 Slim")],
+        [InlineKeyboardButton("PS4 Slim — 799₽/сут", callback_data="ps_PS4 Slim")],
+        [InlineKeyboardButton("PS VR2 — от 999₽/сут", callback_data="ps_PS VR2")],
+        [InlineKeyboardButton("Руль Logitech G29 — 999₽/сут", callback_data="ps_Руль Logitech G29")],
+        [InlineKeyboardButton("Доп. джойстик PS5 — 699₽", callback_data="ps_Доп. джойстик PS5")],
+        [InlineKeyboardButton("Доп. джойстик PS4 — 399₽", callback_data="ps_Доп. джойстик PS4")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_category")],
+    ])
+
+def hookah_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("💨 Кальян — 849₽/сут", callback_data="hook_Кальян")],
+        [InlineKeyboardButton("🪨 Уголь (10шт) — 399₽", callback_data="hook_Уголь (10шт)")],
+        [InlineKeyboardButton("🌿 Табак (25-30г) — от 250₽", callback_data="hook_Табак (25-30г)")],
+        [InlineKeyboardButton("🔥 Плитка — 349₽", callback_data="hook_Плитка")],
+        [InlineKeyboardButton("👨‍🍳 Личный кальянщик — 1149₽/час", callback_data="hook_Личный кальянщик")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="back_category")],
+    ])
+
+def days_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("1 день", callback_data="days_1"),
+         InlineKeyboardButton("2 дня", callback_data="days_2"),
+         InlineKeyboardButton("3 дня", callback_data="days_3")],
+        [InlineKeyboardButton("Написать вручную", callback_data="days_manual")],
+    ])
+
+def confirm_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Подтвердить заказ", callback_data="confirm_yes")],
+        [InlineKeyboardButton("✏️ Изменить", callback_data="confirm_edit")],
+        [InlineKeyboardButton("❌ Отмена", callback_data="confirm_cancel")],
+    ])
+
+def source_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📋 Меню с кальянами", callback_data="src_hookah_menu")],
+        [InlineKeyboardButton("📄 Меню без кальянов", callback_data="src_no_hookah_menu")],
+        [InlineKeyboardButton("🔗 Другой источник", callback_data="src_other")],
+    ])
+
+# ═══════════════════════════════════════════
+# СТАРТ
+# ═══════════════════════════════════════════
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    
+    # Если это админ — сохраняем chat_id
+    if f"@{user.username}" == ADMIN_USERNAME:
+        global ADMIN_CHAT_ID
+        ADMIN_CHAT_ID = update.effective_chat.id
+        await update.message.reply_text(
+            f"👋 Привет, {user.first_name}! Ты зарегистрирован как администратор.\n"
+            f"Все заказы будут приходить сюда."
+        )
+        return ConversationHandler.END
+
+    # Инициализируем данные пользователя
+    context.user_data.clear()
+    context.user_data['cart'] = []
+    context.user_data['user_id'] = user.id
+    context.user_data['username'] = f"@{user.username}" if user.username else user.first_name
+
+    await update.message.reply_text(
+        f"👋 Привет! Добро пожаловать в *Chill TooT* 🎮💨\n\n"
+        f"Мы доставим всё для твоего отдыха прямо к тебе.\n\n"
+        f"Кстати, как ты сегодня? 😊",
+        parse_mode="Markdown"
+    )
+    return HOW_ARE_YOU
+
+async def how_are_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_answer = update.message.text
+    
+    await update.message.reply_text(
+        f"Отлично, приятно слышать! 😊\n\n"
+        f"Напиши свой *адрес* — куда доставить? 📍\n"
+        f"_(улица, дом, квартира или название объекта)_",
+        parse_mode="Markdown"
+    )
+    return GET_ADDRESS
+
+async def get_address(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['address'] = update.message.text
+    
+    await update.message.reply_text(
+        "Откуда ты узнал о нас? 👇",
+        reply_markup=source_keyboard()
+    )
+    return GET_SOURCE
+
+async def get_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    src_map = {
+        "src_hookah_menu": "Меню с кальянами ✅",
+        "src_no_hookah_menu": "Меню без кальянов",
+        "src_other": "Другой источник"
+    }
+    
+    source = src_map.get(query.data, "Не указан")
+    context.user_data['source'] = source
+    context.user_data['has_hookah_menu'] = query.data == "src_hookah_menu"
+    
+    hookah_note = ""
+    if query.data != "src_hookah_menu":
+        hookah_note = "\n\n⚠️ *Кальян* — доставляем только если он есть в вашем меню."
+    
+    await query.edit_message_text(
+        f"Отлично! Адрес: *{context.user_data['address']}*\n\n"
+        f"Что будем заказывать? Выбери категорию 👇{hookah_note}",
+        parse_mode="Markdown",
+        reply_markup=category_keyboard()
+    )
+    return CATEGORY_CHOICE
+
+# ═══════════════════════════════════════════
+# КАТЕГОРИИ
+# ═══════════════════════════════════════════
+
+async def category_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "cat_ps":
+        await query.edit_message_text(
+            "🎮 *PlayStation* — выбери что нужно:",
+            parse_mode="Markdown",
+            reply_markup=ps_keyboard()
+        )
+        return PS_CHOICE
+    
+    elif query.data == "cat_hookah":
+        has_menu = context.user_data.get('has_hookah_menu', False)
+        note = "" if has_menu else "\n\n⚠️ *Внимание:* кальян доставляем только если он есть в вашем меню. Если не уверен — уточни у менеджера."
+        await query.edit_message_text(
+            f"💨 *Кальян и всё для него* — выбери:{note}",
+            parse_mode="Markdown",
+            reply_markup=hookah_keyboard()
+        )
+        return HOOKAH_CHOICE
+    
+    elif query.data == "cat_tea":
+        await query.edit_message_text(
+            "🍵 *Чай* — напиши что именно хочешь:\n\n"
+            "_(сорт, объём, количество персон — или просто напиши и мы подберём)_",
+            parse_mode="Markdown"
+        )
+        return TEA_CHOICE
+    
+    elif query.data == "cat_food":
+        await query.edit_message_text(
+            "🍔 *Еда и напитки* — напиши что хочешь:\n\n"
+            "_(энергетики, соки, чипсы, шоколад, вода или индивидуальный заказ)_",
+            parse_mode="Markdown"
+        )
+        return FOOD_CHOICE
+    
+    elif query.data == "cat_done":
+        return await show_cart(update, context)
+    
+    elif query.data == "back_category":
+        await query.edit_message_text(
+            "Выбери категорию 👇",
+            reply_markup=category_keyboard()
+        )
+        return CATEGORY_CHOICE
+
+# ═══════════════════════════════════════════
+# PLAYSTATION
+# ═══════════════════════════════════════════
+
+async def ps_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "back_category":
+        await query.edit_message_text("Выбери категорию 👇", reply_markup=category_keyboard())
+        return CATEGORY_CHOICE
+    
+    item = query.data.replace("ps_", "")
+    context.user_data['current_item'] = item
+    context.user_data['current_price'] = PRICES.get(item, 0)
+    
+    await query.edit_message_text(
+        f"На сколько дней нужен *{item}*? 📅",
+        parse_mode="Markdown",
+        reply_markup=days_keyboard()
+    )
+    return PS_DAYS
+
+async def ps_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "days_manual":
+        await query.edit_message_text(
+            "Напиши количество дней цифрой 👇"
+        )
+        context.user_data['waiting_days'] = 'ps'
+        return PS_DAYS
+    
+    days = int(query.data.replace("days_", ""))
+    await _add_ps_to_cart(update, context, days, query)
+    return CATEGORY_CHOICE
+
+async def ps_days_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        days = int(update.message.text.strip())
+        await _add_ps_to_cart_text(update, context, days)
+    except ValueError:
+        await update.message.reply_text("Напиши просто число, например: 2")
+        return PS_DAYS
+    return CATEGORY_CHOICE
+
+async def _add_ps_to_cart(update, context, days, query):
+    item = context.user_data['current_item']
+    price = context.user_data['current_price']
+    total = price * days
+    
+    context.user_data['cart'].append({
+        'name': item,
+        'days': days,
+        'price_per_day': price,
+        'total': total,
+        'type': 'ps'
+    })
+    
+    await query.edit_message_text(
+        f"✅ *{item}* на {days} дн. — *{total}₽* добавлен в заказ!\n\n"
+        f"Добавить ещё что-нибудь? 👇",
+        parse_mode="Markdown",
+        reply_markup=category_keyboard()
+    )
+
+async def _add_ps_to_cart_text(update, context, days):
+    item = context.user_data['current_item']
+    price = context.user_data['current_price']
+    total = price * days
+    
+    context.user_data['cart'].append({
+        'name': item,
+        'days': days,
+        'price_per_day': price,
+        'total': total,
+        'type': 'ps'
+    })
+    
+    await update.message.reply_text(
+        f"✅ *{item}* на {days} дн. — *{total}₽* добавлен!\n\n"
+        f"Добавить ещё? 👇",
+        parse_mode="Markdown",
+        reply_markup=category_keyboard()
+    )
+
+# ═══════════════════════════════════════════
+# КАЛЬЯН
+# ═══════════════════════════════════════════
+
+async def hookah_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "back_category":
+        await query.edit_message_text("Выбери категорию 👇", reply_markup=category_keyboard())
+        return CATEGORY_CHOICE
+    
+    item = query.data.replace("hook_", "")
+    context.user_data['current_item'] = item
+    context.user_data['current_price'] = PRICES.get(item, 0)
+    
+    if item in ["Кальян"]:
+        await query.edit_message_text(
+            f"На сколько дней нужен *{item}*? 📅",
+            parse_mode="Markdown",
+            reply_markup=days_keyboard()
+        )
+        return HOOKAH_DAYS
+    else:
+        # Для расходников — спрашиваем количество текстом
+        await query.edit_message_text(
+            f"Сколько нужно *{item}*? Напиши количество 👇",
+            parse_mode="Markdown"
+        )
+        context.user_data['waiting_hookah_qty'] = True
+        return HOOKAH_DAYS
+
+async def hookah_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "days_manual":
+        await query.edit_message_text("Напиши количество дней цифрой 👇")
+        context.user_data['waiting_days'] = 'hookah'
+        return HOOKAH_DAYS
+    
+    days = int(query.data.replace("days_", ""))
+    item = context.user_data['current_item']
+    price = context.user_data['current_price']
+    total = price * days
+    
+    context.user_data['cart'].append({
+        'name': item,
+        'days': days,
+        'price_per_day': price,
+        'total': total,
+        'type': 'hookah'
+    })
+    
+    await query.edit_message_text(
+        f"✅ *{item}* на {days} дн. — *{total}₽* добавлен!\n\nДобавить ещё? 👇",
+        parse_mode="Markdown",
+        reply_markup=category_keyboard()
+    )
+    return CATEGORY_CHOICE
+
+async def hookah_qty_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    
+    if context.user_data.get('waiting_hookah_qty'):
+        try:
+            qty = int(text)
+        except ValueError:
+            await update.message.reply_text("Напиши просто число, например: 2")
+            return HOOKAH_DAYS
+        
+        item = context.user_data['current_item']
+        price = context.user_data['current_price']
+        total = price * qty
+        
+        context.user_data['cart'].append({
+            'name': item,
+            'qty': qty,
+            'price_each': price,
+            'total': total,
+            'type': 'hookah_supplies'
+        })
+        context.user_data['waiting_hookah_qty'] = False
+        
+        await update.message.reply_text(
+            f"✅ *{item}* × {qty} — *{total}₽* добавлен!\n\nДобавить ещё? 👇",
+            parse_mode="Markdown",
+            reply_markup=category_keyboard()
+        )
+        return CATEGORY_CHOICE
+    
+    elif context.user_data.get('waiting_days') == 'hookah':
+        try:
+            days = int(text)
+        except ValueError:
+            await update.message.reply_text("Напиши просто число дней, например: 2")
+            return HOOKAH_DAYS
+        
+        item = context.user_data['current_item']
+        price = context.user_data['current_price']
+        total = price * days
+        
+        context.user_data['cart'].append({
+            'name': item,
+            'days': days,
+            'price_per_day': price,
+            'total': total,
+            'type': 'hookah'
+        })
+        context.user_data['waiting_days'] = None
+        
+        await update.message.reply_text(
+            f"✅ *{item}* на {days} дн. — *{total}₽* добавлен!\n\nДобавить ещё? 👇",
+            parse_mode="Markdown",
+            reply_markup=category_keyboard()
+        )
+        return CATEGORY_CHOICE
+
+# ═══════════════════════════════════════════
+# ЧАЙ
+# ═══════════════════════════════════════════
+
+async def tea_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    
+    context.user_data['cart'].append({
+        'name': f"Чай: {text}",
+        'total': 0,
+        'type': 'tea',
+        'note': 'Цена уточняется'
+    })
+    
+    await update.message.reply_text(
+        f"✅ *Чай* добавлен! Менеджер уточнит цену при подтверждении.\n\nДобавить ещё? 👇",
+        parse_mode="Markdown",
+        reply_markup=category_keyboard()
+    )
+    return CATEGORY_CHOICE
+
+# ═══════════════════════════════════════════
+# ЕДА
+# ═══════════════════════════════════════════
+
+async def food_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    
+    context.user_data['cart'].append({
+        'name': f"Еда/напитки: {text}",
+        'total': 0,
+        'type': 'food',
+        'note': 'Цена уточняется'
+    })
+    
+    await update.message.reply_text(
+        f"✅ Добавлено! Менеджер уточнит цену.\n\nДобавить ещё? 👇",
+        parse_mode="Markdown",
+        reply_markup=category_keyboard()
+    )
+    return CATEGORY_CHOICE
+
+# ═══════════════════════════════════════════
+# КОРЗИНА И ПОДТВЕРЖДЕНИЕ
+# ═══════════════════════════════════════════
+
+async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    cart = context.user_data.get('cart', [])
+    
+    if not cart:
+        msg = "Корзина пуста! Добавь хоть что-нибудь 👇"
+        if query:
+            await query.edit_message_text(msg, reply_markup=category_keyboard())
+        else:
+            await update.message.reply_text(msg, reply_markup=category_keyboard())
+        return CATEGORY_CHOICE
+    
+    # Формируем текст корзины
+    cart_text = "🛒 *Твой заказ:*\n\n"
+    total_sum = 0
+    
+    for item in cart:
+        if item['type'] == 'ps':
+            cart_text += f"🎮 {item['name']} × {item['days']} дн. — *{item['total']}₽*\n"
+            total_sum += item['total']
+        elif item['type'] == 'hookah':
+            cart_text += f"💨 {item['name']} × {item['days']} дн. — *{item['total']}₽*\n"
+            total_sum += item['total']
+        elif item['type'] == 'hookah_supplies':
+            cart_text += f"🪨 {item['name']} × {item['qty']} шт. — *{item['total']}₽*\n"
+            total_sum += item['total']
+        elif item['type'] in ['tea', 'food']:
+            cart_text += f"📦 {item['name']} — *цена уточняется*\n"
+    
+    prepayment = int(total_sum * PREPAYMENT_PERCENT / 100)
+    
+    cart_text += f"\n💰 *Итого: {total_sum}₽*"
+    if prepayment > 0:
+        cart_text += f"\n⚡ Предоплата 20%: *{prepayment}₽*"
+    cart_text += f"\n\n📍 Адрес: {context.user_data.get('address', 'не указан')}"
+    cart_text += f"\n📋 Источник: {context.user_data.get('source', 'не указан')}"
+    
+    context.user_data['total_sum'] = total_sum
+    context.user_data['prepayment'] = prepayment
+    
+    if query:
+        await query.edit_message_text(
+            cart_text,
+            parse_mode="Markdown",
+            reply_markup=confirm_keyboard()
+        )
+    else:
+        await update.message.reply_text(
+            cart_text,
+            parse_mode="Markdown",
+            reply_markup=confirm_keyboard()
+        )
+    return CONFIRM_ORDER
+
+async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "confirm_cancel":
+        context.user_data.clear()
+        await query.edit_message_text(
+            "❌ Заказ отменён. Напиши /start чтобы начать заново."
+        )
+        return ConversationHandler.END
+    
+    elif query.data == "confirm_edit":
+        await query.edit_message_text(
+            "Что хочешь изменить? Выбери категорию 👇",
+            reply_markup=category_keyboard()
+        )
+        return CATEGORY_CHOICE
+    
+    elif query.data == "confirm_yes":
+        # Создаём заказ
+        order_id = get_order_id()
+        user_data = context.user_data
+        
+        # Сохраняем заказ
+        orders_db[order_id] = {
+            'id': order_id,
+            'user_id': user_data.get('user_id'),
+            'username': user_data.get('username'),
+            'address': user_data.get('address'),
+            'source': user_data.get('source'),
+            'cart': user_data.get('cart', []),
+            'total': user_data.get('total_sum', 0),
+            'prepayment': user_data.get('prepayment', 0),
+            'status': 'Новый'
+        }
+        
+        # Если нет истории у пользователя — создаём
+        uid = user_data.get('user_id')
+        if uid not in [o.get('user_id') for o in orders_db.values() if o['id'] != order_id]:
+            pass
+        
+        # Формируем сообщение для администратора
+        admin_msg = f"🔔 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n"
+        admin_msg += f"👤 Клиент: {user_data.get('username')}\n"
+        admin_msg += f"📍 Адрес: {user_data.get('address')}\n"
+        admin_msg += f"📋 Источник: {user_data.get('source')}\n\n"
+        admin_msg += "🛒 *Состав заказа:*\n"
+        
+        for item in user_data.get('cart', []):
+            if item['type'] == 'ps':
+                admin_msg += f"🎮 {item['name']} × {item['days']} дн. — {item['total']}₽\n"
+            elif item['type'] == 'hookah':
+                admin_msg += f"💨 {item['name']} × {item['days']} дн. — {item['total']}₽\n"
+            elif item['type'] == 'hookah_supplies':
+                admin_msg += f"🪨 {item['name']} × {item['qty']} шт. — {item['total']}₽\n"
+            elif item['type'] in ['tea', 'food']:
+                admin_msg += f"📦 {item['name']} — цена уточняется\n"
+        
+        admin_msg += f"\n💰 *Итого: {user_data.get('total_sum', 0)}₽*"
+        admin_msg += f"\n⚡ Предоплата 20%: *{user_data.get('prepayment', 0)}₽*"
+        
+        # Отправляем админу
+        try:
+            if ADMIN_CHAT_ID:
+                await context.bot.send_message(
+                    chat_id=ADMIN_CHAT_ID,
+                    text=admin_msg,
+                    parse_mode="Markdown"
+                )
+        except Exception as e:
+            logger.error(f"Не удалось отправить сообщение админу: {e}")
+        
+        # Сообщение клиенту
+        prepayment = user_data.get('prepayment', 0)
+        total = user_data.get('total_sum', 0)
+        
+        client_msg = (
+            f"✅ *Заказ #{order_id} принят!*\n\n"
+            f"Наш менеджер свяжется с тобой в ближайшее время для подтверждения.\n\n"
+        )
+        
+        if prepayment > 0:
+            client_msg += (
+                f"⚡ *Предоплата 20% — {prepayment}₽*\n"
+                f"Возможна предоплата перед доставкой.\n\n"
+            )
+        
+        client_msg += (
+            f"📞 Если срочно — пиши нам: {ADMIN_USERNAME}\n\n"
+            f"Спасибо что выбрал Chill TooT! 🎮💨"
+        )
+        
+        await query.edit_message_text(
+            client_msg,
+            parse_mode="Markdown",
+            reply_markup=main_menu_keyboard()
+        )
+        
+        # Сохраняем заказ в историю пользователя
+        uid = user_data.get('user_id')
+        context.user_data['last_order_id'] = order_id
+        
+        return ConversationHandler.END
+
+# ═══════════════════════════════════════════
+# ИСТОРИЯ ЗАКАЗОВ
+# ═══════════════════════════════════════════
+
+async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    uid = update.effective_user.id
+    user_orders = [o for o in orders_db.values() if o.get('user_id') == uid]
+    
+    if not user_orders:
+        text = "📋 У тебя пока нет заказов.\n\nОформи первый! 👇"
+        kb = main_menu_keyboard()
+        if query:
+            await query.edit_message_text(text, reply_markup=kb)
+        else:
+            await update.message.reply_text(text, reply_markup=kb)
+        return ConversationHandler.END
+    
+    text = "📋 *Твои заказы:*\n\n"
+    for o in user_orders[-5:]:  # Последние 5
+        text += f"*Заказ #{o['id']}* — {o['total']}₽ — {o['status']}\n"
+        text += f"📍 {o['address']}\n\n"
+    
+    if query:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    
+    return ConversationHandler.END
+
+# ═══════════════════════════════════════════
+# КУБИК
+# ═══════════════════════════════════════════
+
+async def roll_dice(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if query:
+        await query.answer()
+    
+    result = random.randint(1, 6)
+    emojis = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣"}
+    
+    text = f"🎲 Бросаю кубик...\n\nВыпало: *{emojis[result]} ({result})*!"
+    
+    if result == 6:
+        text += "\n\n🔥 Ого, шесть! Это знак — самое время заказать что-нибудь крутое 😄"
+    elif result == 1:
+        text += "\n\n😅 Единица... но зато заказ точно будет отличным!"
+    
+    if query:
+        await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    else:
+        await update.message.reply_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    
+    return ConversationHandler.END
+
+# ═══════════════════════════════════════════
+# ГЛАВНОЕ МЕНЮ ЧЕРЕЗ /menu
+# ═══════════════════════════════════════════
+
+async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Привет! Что хочешь сделать? 👇",
+        reply_markup=main_menu_keyboard()
+    )
+
+async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "order":
+        context.user_data.clear()
+        context.user_data['cart'] = []
+        user = update.effective_user
+        context.user_data['user_id'] = user.id
+        context.user_data['username'] = f"@{user.username}" if user.username else user.first_name
+        
+        await query.edit_message_text(
+            "Как ты сегодня? 😊\n\nНапиши пару слов — и начнём оформлять заказ!"
+        )
+        return HOW_ARE_YOU
+    
+    elif query.data == "history":
+        return await show_history(update, context)
+    
+    elif query.data == "dice":
+        return await roll_dice(update, context)
+
+async def fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Напиши /start чтобы начать или /menu для главного меню."
+    )
+    return ConversationHandler.END
+
+# ═══════════════════════════════════════════
+# ЗАПУСК
+# ═══════════════════════════════════════════
+
+def main():
+    app = Application.builder().token(TOKEN).build()
+    
+    conv_handler = ConversationHandler(
+        entry_points=[
+            CommandHandler("start", start),
+            CommandHandler("menu", menu_command),
+            CallbackQueryHandler(handle_main_menu, pattern="^(order|history|dice)$"),
+        ],
+        states={
+            HOW_ARE_YOU: [MessageHandler(filters.TEXT & ~filters.COMMAND, how_are_you)],
+            GET_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_address)],
+            GET_SOURCE: [CallbackQueryHandler(get_source, pattern="^src_")],
+            CATEGORY_CHOICE: [
+                CallbackQueryHandler(category_choice, pattern="^cat_"),
+                CallbackQueryHandler(show_cart, pattern="^cat_done$"),
+            ],
+            PS_CHOICE: [
+                CallbackQueryHandler(ps_choice, pattern="^(ps_|back_category)"),
+            ],
+            PS_DAYS: [
+                CallbackQueryHandler(ps_days, pattern="^days_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, ps_days_text),
+            ],
+            HOOKAH_CHOICE: [
+                CallbackQueryHandler(hookah_choice, pattern="^(hook_|back_category)"),
+            ],
+            HOOKAH_DAYS: [
+                CallbackQueryHandler(hookah_days, pattern="^days_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, hookah_qty_text),
+            ],
+            TEA_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, tea_choice)],
+            FOOD_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, food_choice)],
+            CONFIRM_ORDER: [CallbackQueryHandler(confirm_order, pattern="^confirm_")],
+        },
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("menu", menu_command),
+            MessageHandler(filters.TEXT, fallback),
+        ],
+        allow_reentry=True,
+    )
+    
+    app.add_handler(conv_handler)
+    app.add_handler(CallbackQueryHandler(show_history, pattern="^history$"))
+    app.add_handler(CallbackQueryHandler(roll_dice, pattern="^dice$"))
+    
+    logger.info("Бот запущен!")
+    app.run_polling(drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
