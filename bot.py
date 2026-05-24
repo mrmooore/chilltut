@@ -51,6 +51,12 @@ def get_order_id():
     order_counter[0] += 1
     return order_counter[0]
 
+def escape_md(text):
+    """Экранирует спецсимволы Markdown, чтобы избежать падения бота при выводе пользовательского ввода"""
+    if not text:
+        return ""
+    return str(text).replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+
 # ═══════════════════════════════════════════
 # КЛАВИАТУРЫ
 # ═══════════════════════════════════════════
@@ -201,8 +207,10 @@ async def get_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if query.data != "src_hookah_menu":
         hookah_note = "\n\n⚠️ *Кальян* — доставляем только если он есть в вашем меню."
     
+    safe_address = escape_md(context.user_data.get('address', ''))
+    
     await query.edit_message_text(
-        f"Отлично! Адрес: *{context.user_data['address']}*\n\n"
+        f"Отлично! Адрес: *{safe_address}*\n\n"
         f"Что будем заказывать? Выбери категорию 👇{hookah_note}",
         parse_mode="Markdown",
         reply_markup=category_keyboard()
@@ -486,8 +494,12 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cart_text += f"\n💰 *Итого: {total_sum}₽*"
     if prepayment > 0:
         cart_text += f"\n⚡ Предоплата 20%: *{prepayment}₽*"
-    cart_text += f"\n\n📍 Адрес: {context.user_data.get('address', 'не указан')}"
-    cart_text += f"\n📋 Источник: {context.user_data.get('source', 'не указан')}"
+        
+    safe_address = escape_md(context.user_data.get('address', 'не указан'))
+    safe_source = escape_md(context.user_data.get('source', 'не указан'))
+    
+    cart_text += f"\n📍 Адрес: {safe_address}"
+    cart_text += f"\n📋 Источник: {safe_source}"
     
     context.user_data['total_sum'] = total_sum
     context.user_data['prepayment'] = prepayment
@@ -524,7 +536,11 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'status': 'Новый'
         }
         
-        admin_msg = f"🔔 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n👤 Клиент: {user_data.get('username')}\n📍 Адрес: {user_data.get('address')}\n📋 Источник: {user_data.get('source')}\n\n🛒 *Состав:*\n"
+        safe_username = escape_md(user_data.get('username', ''))
+        safe_address = escape_md(user_data.get('address', ''))
+        safe_source = escape_md(user_data.get('source', ''))
+        
+        admin_msg = f"🔔 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n👤 Клиент: {safe_username}\n📍 Адрес: {safe_address}\n📋 Источник: {safe_source}\n\n🛒 *Состав:*\n"
         for item in user_data.get('cart', []):
             if item['type'] == 'ps':
                 admin_msg += f"🎮 {item['name']} × {item['days']} дн. — {item['total']}₽\n"
@@ -565,7 +581,8 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         text = "📋 *Твои заказы:*\n\n"
         for o in user_orders[-5:]:
-            text += f"*Заказ #{o['id']}* — {o['total']}₽ — {o['status']}\n📍 {o['address']}\n\n"
+            safe_address = escape_md(o['address'])
+            text += f"*Заказ #{o['id']}* — {o['total']}₽ — {o['status']}\n📍 {safe_address}\n\n"
             
     await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
     return START
