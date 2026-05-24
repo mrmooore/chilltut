@@ -435,7 +435,7 @@ async def tea_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'name': f"Чай: {text}", 'total': 0, 'type': 'tea'
     })
     await update.message.reply_text(
-        f"✅ *Чай* добавлен! Менеджер утончит цену.\n\nДобавить ещё? 👇",
+        f"✅ *Чай* добавлен! Менеджер уточнит цену.\n\nДобавить ещё? 👇",
         parse_mode="Markdown",
         reply_markup=category_keyboard()
     )
@@ -631,7 +631,7 @@ def main():
     
     app.add_handler(conv_handler)
     logger.info("Бот успешно запущен!")
-    app.run_polling(drop_pending_updates=True)
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
