@@ -14,7 +14,7 @@ ADMIN_USERNAME = "@Chill_TooT_Vrn"
 
 # TODO: ЗАМЕНИТЕ 0 НА ВАШ ЦИФРОВОЙ ID ИЗ @userinfobot (например: 512345678)
 # После этого бот никогда не потеряет связь с админом, даже после перезапуска хостинга.
-ADMIN_CHAT_ID = 0  
+ADMIN_CHAT_ID = 5512352260  
 
 PREPAYMENT_PERCENT = 20
 
