@@ -11,7 +11,10 @@ from telegram.ext import (
 # ═══════════════════════════════════════════
 TOKEN = "8862192483:AAGI2bwDL7pjNJFFAMpL461m437ChNqCopM"
 ADMIN_USERNAME = "@Chill_TooT_Vrn"
-ADMIN_CHAT_ID = None  # Заполнится автоматически, когда админ напишет /start
+
+# TODO: ЗАМЕНИТЕ 0 НА ВАШ ЦИФРОВОЙ ID ИЗ @userinfobot (например: 512345678)
+# После этого бот никогда не потеряет связь с админом, даже после перезапуска хостинга.
+ADMIN_CHAT_ID = 0  
 
 PREPAYMENT_PERCENT = 20
 
@@ -126,12 +129,12 @@ def source_keyboard():
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    global ADMIN_CHAT_ID
     
     if f"@{user.username}" == ADMIN_USERNAME:
-        global ADMIN_CHAT_ID
         ADMIN_CHAT_ID = update.effective_chat.id
         await update.message.reply_text(
-            f"👋 Привет, {user.first_name}! Ты зарегистрирован как администратор.\nВсе заказы будут приходить сюда."
+            f"👋 Привет, {user.first_name}! Твой актуальный chat_id подтвержден: `{ADMIN_CHAT_ID}`.\nВсе заказы поступают сюда."
         )
         return ConversationHandler.END
 
@@ -478,17 +481,18 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_sum = 0
     
     for item in cart:
+        safe_item_name = escape_md(item['name'])
         if item['type'] == 'ps':
-            cart_text += f"🎮 {item['name']} × {item['days']} дн. — *{item['total']}₽*\n"
+            cart_text += f"🎮 {safe_item_name} × {item['days']} дн. — *{item['total']}₽*\n"
             total_sum += item['total']
         elif item['type'] == 'hookah':
-            cart_text += f"💨 {item['name']} × {item['days']} дн. — *{item['total']}₽*\n"
+            cart_text += f"💨 {safe_item_name} × {item['days']} дн. — *{item['total']}₽*\n"
             total_sum += item['total']
         elif item['type'] == 'hookah_supplies':
-            cart_text += f"🪨 {item['name']} × {item['qty']} шт. — *{item['total']}₽*\n"
+            cart_text += f"🪨 {safe_item_name} × {item['qty']} шт. — *{item['total']}₽*\n"
             total_sum += item['total']
         elif item['type'] in ['tea', 'food']:
-            cart_text += f"📦 {item['name']} — *цена уточняется*\n"
+            cart_text += f"📦 {safe_item_name} — *цена уточняется*\n"
     
     prepayment = int(total_sum * PREPAYMENT_PERCENT / 100)
     cart_text += f"\n💰 *Итого: {total_sum}₽*"
@@ -542,22 +546,25 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         admin_msg = f"🔔 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n👤 Клиент: {safe_username}\n📍 Адрес: {safe_address}\n📋 Источник: {safe_source}\n\n🛒 *Состав:*\n"
         for item in user_data.get('cart', []):
+            safe_name = escape_md(item['name'])
             if item['type'] == 'ps':
-                admin_msg += f"🎮 {item['name']} × {item['days']} дн. — {item['total']}₽\n"
+                admin_msg += f"🎮 {safe_name} × {item['days']} дн. — {item['total']}₽\n"
             elif item['type'] == 'hookah':
-                admin_msg += f"💨 {item['name']} × {item['days']} дн. — {item['total']}₽\n"
+                admin_msg += f"💨 {safe_name} × {item['days']} дн. — {item['total']}₽\n"
             elif item['type'] == 'hookah_supplies':
-                admin_msg += f"🪨 {item['name']} × {item['qty']} шт. — {item['total']}₽\n"
+                admin_msg += f"🪨 {safe_name} × {item['qty']} шт. — {item['total']}₽\n"
             elif item['type'] in ['tea', 'food']:
-                admin_msg += f"📦 {item['name']} — цена уточняется\n"
+                admin_msg += f"📦 {safe_name} — цена уточняется\n"
         
         admin_msg += f"\n💰 *Итого: {user_data.get('total_sum', 0)}₽*\n⚡ Предоплата 20%: *{user_data.get('prepayment', 0)}₽*"
         
-        try:
-            if ADMIN_CHAT_ID:
+        if ADMIN_CHAT_ID and ADMIN_CHAT_ID != 0:
+            try:
                 await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_msg, parse_mode="Markdown")
-        except Exception as e:
-            logger.error(f"Не удалось отправить сообщение админу: {e}")
+            except Exception as e:
+                logger.error(f"Не удалось отправить сообщение админу: {e}")
+        else:
+            logger.warning("Заказ оформлен, но ADMIN_CHAT_ID равен 0 или не задан. Сообщение не отправлено!")
         
         client_msg = f"✅ *Заказ #{order_id} принят!*\n\nНаш менеджер свяжется с тобой в ближайшее время.\n\n"
         if user_data.get('prepayment', 0) > 0:
