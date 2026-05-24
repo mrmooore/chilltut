@@ -1,5 +1,6 @@
 import logging
 import random
+import html  # Заменили кастомный экранизатор на надежный стандартный HTML-escape
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, CommandHandler, MessageHandler, CallbackQueryHandler,
@@ -12,9 +13,8 @@ from telegram.ext import (
 TOKEN = "8862192483:AAGI2bwDL7pjNJFFAMpL461m437ChNqCopM"
 ADMIN_USERNAME = "@Chill_TooT_Vrn"
 
-# TODO: ЗАМЕНИТЕ 0 НА ВАШ ЦИФРОВОЙ ID ИЗ @userinfobot (например: 512345678)
-# После этого бот никогда не потеряет связь с админом, даже после перезапуска хостинга.
-ADMIN_CHAT_ID = 5512352260  
+# TODO: Укажите здесь ваш цифровой ID из @userinfobot (например: 512345678)
+ADMIN_CHAT_ID = 0  
 
 PREPAYMENT_PERCENT = 20
 
@@ -53,12 +53,6 @@ order_counter = [1000]
 def get_order_id():
     order_counter[0] += 1
     return order_counter[0]
-
-def escape_md(text):
-    """Экранирует спецсимволы Markdown, чтобы избежать падения бота при выводе пользовательского ввода"""
-    if not text:
-        return ""
-    return str(text).replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
 
 # ═══════════════════════════════════════════
 # КЛАВИАТУРЫ
@@ -118,7 +112,7 @@ def confirm_keyboard():
 
 def source_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📋 Меню с кальянами", callback_data="src_hookah_menu")],
+        [InlineKeyboardButton("📋 Мею с кальянами", callback_data="src_hookah_menu")],
         [InlineKeyboardButton("📄 Меню без кальянов", callback_data="src_no_hookah_menu")],
         [InlineKeyboardButton("🔗 Другой источник", callback_data="src_other")],
     ])
@@ -134,7 +128,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if f"@{user.username}" == ADMIN_USERNAME:
         ADMIN_CHAT_ID = update.effective_chat.id
         await update.message.reply_text(
-            f"👋 Привет, {user.first_name}! Твой актуальный chat_id подтвержден: `{ADMIN_CHAT_ID}`.\nВсе заказы поступают сюда."
+            f"👋 Привет, {user.first_name}! Твой актуальный chat_id подтвержден: <b>{ADMIN_CHAT_ID}</b>.\nВсе заказы поступают сюда.",
+            parse_mode="HTML"
         )
         return ConversationHandler.END
 
@@ -162,10 +157,10 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == "order":
         await query.edit_message_text(
-            f"👋 Привет! Добро пожаловать в *Chill TooT* 🎮💨\n\n"
+            f"👋 Привет! Добро пожаловать в <b>Chill TooT</b> 🎮💨\n\n"
             f"Мы доставим всё для твоего отдыха прямо к тебе.\n\n"
             f"Кстати, как ты сегодня? 😊",
-            parse_mode="Markdown"
+            parse_mode="HTML"
         )
         return HOW_ARE_YOU
     
@@ -178,9 +173,9 @@ async def handle_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def how_are_you(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Отлично, приятно слышать! 😊\n\n"
-        f"Напиши свой *адрес* — куда доставить? 📍\n"
-        f"_(улица, дом, квартира или название объекта)_",
-        parse_mode="Markdown"
+        f"Напиши свой <b>адрес</b> — куда доставить? 📍\n"
+        f"<i>(улица, дом, квартира или название объекта)</i>",
+        parse_mode="HTML"
     )
     return GET_ADDRESS
 
@@ -208,14 +203,14 @@ async def get_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     hookah_note = ""
     if query.data != "src_hookah_menu":
-        hookah_note = "\n\n⚠️ *Кальян* — доставляем только если он есть в вашем меню."
+        hookah_note = "\n\n⚠️ <b>Кальян</b> — доставляем только если он есть в вашем меню."
     
-    safe_address = escape_md(context.user_data.get('address', ''))
+    safe_address = html.escape(context.user_data.get('address', ''))
     
     await query.edit_message_text(
-        f"Отлично! Адрес: *{safe_address}*\n\n"
+        f"Отлично! Адрес: <b>{safe_address}</b>\n\n"
         f"Что будем заказывать? Выбери категорию 👇{hookah_note}",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -230,35 +225,35 @@ async def category_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if query.data == "cat_ps":
         await query.edit_message_text(
-            "🎮 *PlayStation* — выбери что нужно:",
-            parse_mode="Markdown",
+            "🎮 <b>PlayStation</b> — выбери что нужно:",
+            parse_mode="HTML",
             reply_markup=ps_keyboard()
         )
         return PS_CHOICE
     
     elif query.data == "cat_hookah":
         has_menu = context.user_data.get('has_hookah_menu', False)
-        note = "" if has_menu else "\n\n⚠️ *Внимание:* кальян доставляем только если он есть в вашем меню."
+        note = "" if has_menu else "\n\n⚠️ <b>Внимание:</b> кальян доставляем только если он есть в вашем меню."
         await query.edit_message_text(
-            f"💨 *Кальян и всё для него* — выбери:{note}",
-            parse_mode="Markdown",
+            f"💨 <b>Кальян и всё для него</b> — выбери:{note}",
+            parse_mode="HTML",
             reply_markup=hookah_keyboard()
         )
         return HOOKAH_CHOICE
     
     elif query.data == "cat_tea":
         await query.edit_message_text(
-            "🍵 *Чай* — напиши что именно хочешь:\n\n"
-            "_(сорт, объём, количество персон — или просто напиши и мы подберём)_",
-            parse_mode="Markdown"
+            "🍵 <b>Чай</b> — напиши что именно хочешь:\n\n"
+            "<i>(сорт, объём, количество персон — или просто напиши и мы подберём)</i>",
+            parse_mode="HTML"
         )
         return TEA_CHOICE
     
     elif query.data == "cat_food":
         await query.edit_message_text(
-            "🍔 *Еда и напитки* — напиши что хочешь:\n\n"
-            "_(энергетики, соки, чипсы, шоколад, вода или индивидуальный заказ)_",
-            parse_mode="Markdown"
+            "🍔 <b>Еда и напитки</b> — напиши что хочешь:\n\n"
+            "<i>(энергетики, соки, чипсы, шоколад, вода или индивидуальный заказ)</i>",
+            parse_mode="HTML"
         )
         return FOOD_CHOICE
     
@@ -289,8 +284,8 @@ async def ps_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['current_price'] = PRICES.get(item, 0)
     
     await query.edit_message_text(
-        f"На сколько дней нужен *{item}*? 📅",
-        parse_mode="Markdown",
+        f"На сколько дней нужен <b>{item}</b>? 📅",
+        parse_mode="HTML",
         reply_markup=days_keyboard()
     )
     return PS_DAYS
@@ -315,8 +310,8 @@ async def ps_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     
     await query.edit_message_text(
-        f"✅ *{item}* на {days} дн. — *{total}₽* добавлен в заказ!\n\nДобавить ещё что-нибудь? 👇",
-        parse_mode="Markdown",
+        f"✅ <b>{item}</b> на {days} дн. — <b>{total}₽</b> добавлен в заказ!\n\nДобавить ещё что-нибудь? 👇",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -337,8 +332,8 @@ async def ps_days_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     
     await update.message.reply_text(
-        f"✅ *{item}* на {days} дн. — *{total}₽* добавлен!\n\nДобавить ещё? 👇",
-        parse_mode="Markdown",
+        f"✅ <b>{item}</b> на {days} дн. — <b>{total}₽</b> добавлен!\n\nДобавить ещё? 👇",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -361,16 +356,16 @@ async def hookah_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if item == "Кальян":
         await query.edit_message_text(
-            f"На сколько дней нужен *{item}*? 📅",
-            parse_mode="Markdown",
+            f"На сколько дней нужен <b>{item}</b>? 📅",
+            parse_mode="HTML",
             reply_markup=days_keyboard()
         )
         context.user_data['waiting_hookah_qty'] = False
         return HOOKAH_DAYS
     else:
         await query.edit_message_text(
-            f"Сколько нужно *{item}*? Напиши количество 👇",
-            parse_mode="Markdown"
+            f"Сколько нужно <b>{item}</b>? Напиши количество 👇",
+            parse_mode="HTML"
         )
         context.user_data['waiting_hookah_qty'] = True
         return HOOKAH_DAYS
@@ -394,8 +389,8 @@ async def hookah_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     
     await query.edit_message_text(
-        f"✅ *{item}* на {days} дн. — *{total}₽* добавлен!\n\nДобавить ещё? 👇",
-        parse_mode="Markdown",
+        f"✅ <b>{item}</b> на {days} дн. — <b>{total}₽</b> добавлен!\n\nДобавить ещё? 👇",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -430,8 +425,8 @@ async def hookah_qty_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         })
     
     await update.message.reply_text(
-        f"✅ *{item}* добавлен! — *{total}₽*\n\nДобавить ещё? 👇",
-        parse_mode="Markdown",
+        f"✅ <b>{item}</b> добавлен! — <b>{total}₽</b>\n\nДобавить ещё? 👇",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -446,8 +441,8 @@ async def tea_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'name': f"Чай: {text}", 'total': 0, 'type': 'tea'
     })
     await update.message.reply_text(
-        f"✅ *Чай* добавлен! Менеджер уточнит цену.\n\nДобавить ещё? 👇",
-        parse_mode="Markdown",
+        f"✅ <b>Чай</b> добавлен! Менеджер уточнит цену.\n\nДобавить ещё? 👇",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -459,7 +454,7 @@ async def food_choice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     await update.message.reply_text(
         f"✅ Добавлено! Менеджер уточнит цену.\n\nДобавить ещё? 👇",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=category_keyboard()
     )
     return CATEGORY_CHOICE
@@ -477,30 +472,30 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg, reply_markup=category_keyboard())
         return CATEGORY_CHOICE
     
-    cart_text = "🛒 *Твой заказ:*\n\n"
+    cart_text = "🛒 <b>Твой заказ:</b>\n\n"
     total_sum = 0
     
     for item in cart:
-        safe_item_name = escape_md(item['name'])
+        safe_item_name = html.escape(item['name'])
         if item['type'] == 'ps':
-            cart_text += f"🎮 {safe_item_name} × {item['days']} дн. — *{item['total']}₽*\n"
+            cart_text += f"🎮 {safe_item_name} × {item['days']} дн. — <b>{item['total']}₽</b>\n"
             total_sum += item['total']
         elif item['type'] == 'hookah':
-            cart_text += f"💨 {safe_item_name} × {item['days']} дн. — *{item['total']}₽*\n"
+            cart_text += f"💨 {safe_item_name} × {item['days']} дн. — <b>{item['total']}₽</b>\n"
             total_sum += item['total']
         elif item['type'] == 'hookah_supplies':
-            cart_text += f"🪨 {safe_item_name} × {item['qty']} шт. — *{item['total']}₽*\n"
+            cart_text += f"🪨 {safe_item_name} × {item['qty']} шт. — <b>{item['total']}₽</b>\n"
             total_sum += item['total']
         elif item['type'] in ['tea', 'food']:
-            cart_text += f"📦 {safe_item_name} — *цена уточняется*\n"
+            cart_text += f"📦 {safe_item_name} — <i>цена уточняется</i>\n"
     
     prepayment = int(total_sum * PREPAYMENT_PERCENT / 100)
-    cart_text += f"\n💰 *Итого: {total_sum}₽*"
+    cart_text += f"\n💰 <b>Итого: {total_sum}₽</b>"
     if prepayment > 0:
-        cart_text += f"\n⚡ Предоплата 20%: *{prepayment}₽*"
+        cart_text += f"\n⚡ Предоплата 20%: <b>{prepayment}₽</b>"
         
-    safe_address = escape_md(context.user_data.get('address', 'не указан'))
-    safe_source = escape_md(context.user_data.get('source', 'не указан'))
+    safe_address = html.escape(context.user_data.get('address', 'не указан'))
+    safe_source = html.escape(context.user_data.get('source', 'не указан'))
     
     cart_text += f"\n📍 Адрес: {safe_address}"
     cart_text += f"\n📋 Источник: {safe_source}"
@@ -508,7 +503,7 @@ async def show_cart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['total_sum'] = total_sum
     context.user_data['prepayment'] = prepayment
     
-    await query.edit_message_text(cart_text, parse_mode="Markdown", reply_markup=confirm_keyboard())
+    await query.edit_message_text(cart_text, parse_mode="HTML", reply_markup=confirm_keyboard())
     return CONFIRM_ORDER
 
 async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -540,13 +535,13 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'status': 'Новый'
         }
         
-        safe_username = escape_md(user_data.get('username', ''))
-        safe_address = escape_md(user_data.get('address', ''))
-        safe_source = escape_md(user_data.get('source', ''))
+        safe_username = html.escape(user_data.get('username', ''))
+        safe_address = html.escape(user_data.get('address', ''))
+        safe_source = html.escape(user_data.get('source', ''))
         
-        admin_msg = f"🔔 *НОВЫЙ ЗАКАЗ #{order_id}*\n\n👤 Клиент: {safe_username}\n📍 Адрес: {safe_address}\n📋 Источник: {safe_source}\n\n🛒 *Состав:*\n"
+        admin_msg = f"🔔 <b>НОВЫЙ ЗАКАЗ #{order_id}</b>\n\n👤 Клиент: {safe_username}\n📍 Адрес: {safe_address}\n📋 Источник: {safe_source}\n\n🛒 <b>Состав:</b>\n"
         for item in user_data.get('cart', []):
-            safe_name = escape_md(item['name'])
+            safe_name = html.escape(item['name'])
             if item['type'] == 'ps':
                 admin_msg += f"🎮 {safe_name} × {item['days']} дн. — {item['total']}₽\n"
             elif item['type'] == 'hookah':
@@ -556,22 +551,22 @@ async def confirm_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
             elif item['type'] in ['tea', 'food']:
                 admin_msg += f"📦 {safe_name} — цена уточняется\n"
         
-        admin_msg += f"\n💰 *Итого: {user_data.get('total_sum', 0)}₽*\n⚡ Предоплата 20%: *{user_data.get('prepayment', 0)}₽*"
+        admin_msg += f"\n💰 <b>Итого: {user_data.get('total_sum', 0)}₽</b>\n⚡ Предоплата 20%: <b>{user_data.get('prepayment', 0)}₽</b>"
         
         if ADMIN_CHAT_ID and ADMIN_CHAT_ID != 0:
             try:
-                await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_msg, parse_mode="Markdown")
+                await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=admin_msg, parse_mode="HTML")
             except Exception as e:
                 logger.error(f"Не удалось отправить сообщение админу: {e}")
         else:
             logger.warning("Заказ оформлен, но ADMIN_CHAT_ID равен 0 или не задан. Сообщение не отправлено!")
         
-        client_msg = f"✅ *Заказ #{order_id} принят!*\n\nНаш менеджер свяжется с тобой в ближайшее время.\n\n"
+        client_msg = f"✅ <b>Заказ #{order_id} принят!</b>\n\nНаш менеджер свяжется с тобой в ближайшее время.\n\n"
         if user_data.get('prepayment', 0) > 0:
-            client_msg += f"⚡ *Предоплата 20% — {user_data.get('prepayment')}₽*\n\n"
+            client_msg += f"⚡ <b>Предоплата 20% — {user_data.get('prepayment')}₽</b>\n\n"
         client_msg += f"📞 Срочные вопросы: {ADMIN_USERNAME}\n\nСпасибо за заказ! 🎉"
         
-        await query.edit_message_text(client_msg, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+        await query.edit_message_text(client_msg, parse_mode="HTML", reply_markup=main_menu_keyboard())
         return START
 
 # ═══════════════════════════════════════════
@@ -586,12 +581,12 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user_orders:
         text = "📋 У тебя пока нет заказов.\n\nОформи первый! 👇"
     else:
-        text = "📋 *Твои заказы:*\n\n"
+        text = "📋 <b>Твои заказы:</b>\n\n"
         for o in user_orders[-5:]:
-            safe_address = escape_md(o['address'])
-            text += f"*Заказ #{o['id']}* — {o['total']}₽ — {o['status']}\n📍 {safe_address}\n\n"
+            safe_address = html.escape(o['address'])
+            text += f"<b>Заказ #{o['id']}</b> — {o['total']}₽ — {o['status']}\n📍 {safe_address}\n\n"
             
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=main_menu_keyboard())
     return START
 
 async def roll_dice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -599,11 +594,11 @@ async def roll_dice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = random.randint(1, 6)
     emojis = {1: "1️⃣", 2: "2️⃣", 3: "3️⃣", 4: "4️⃣", 5: "5️⃣", 6: "6️⃣"}
     
-    text = f"🎲 Бросаю кубик...\n\nВыпало: *{emojis[result]} ({result})*!"
+    text = f"🎲 Бросаю кубик...\n\nВыпало: <b>{emojis[result]} ({result})</b>!"
     if result == 6:
         text += "\n\n🔥 Шесть! Самое время оформить заказ 😄"
         
-    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=main_menu_keyboard())
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=main_menu_keyboard())
     return START
 
 async def fallback(update: Update, context: ContextTypes.DEFAULT_TYPE):
