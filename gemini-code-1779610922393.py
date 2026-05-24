@@ -9,7 +9,7 @@ from telegram.ext import (
 # ═══════════════════════════════════════════
 # НАСТРОЙКИ
 # ═══════════════════════════════════════════
-TOKEN = "ТВОЙ_ТОКЕН_БОТА"
+TOKEN = "8862192483:AAGI2bwDL7pjNJFFAMpL461m437ChNqCopM"
 ADMIN_USERNAME = "@Chill_TooT_Vrn"
 ADMIN_CHAT_ID = None  # Заполнится автоматически, когда админ напишет /start
 
